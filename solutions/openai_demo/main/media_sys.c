@@ -1,4 +1,4 @@
-/* Media system
+/* Media system with Wake Word Integration
 
    This example code is in the Public Domain (or CC0 licensed, at your option.)
 
@@ -20,28 +20,87 @@
 #include "esp_capture_defaults.h"
 #include "esp_capture_sink.h"
 #include "esp_log.h"
+#include "wakeword_handler.h"
 
-#define RET_ON_NULL(ptr, v) do {                                \
-    if (ptr == NULL) {                                          \
-        ESP_LOGE(TAG, "Memory allocate fail on %d", __LINE__);  \
-        return v;                                               \
-    }                                                           \
-} while (0)
+#define RET_ON_NULL(ptr, v)                                        \
+    do                                                             \
+    {                                                              \
+        if (ptr == NULL)                                           \
+        {                                                          \
+            ESP_LOGE(TAG, "Memory allocate fail on %d", __LINE__); \
+            return v;                                              \
+        }                                                          \
+    } while (0)
 
 #define TAG "MEDIA_SYS"
 
-typedef struct {
-    esp_capture_sink_handle_t   capture_handle;
+typedef struct
+{
+    esp_capture_sink_handle_t capture_handle;
     esp_capture_audio_src_if_t *aud_src;
+    esp_capture_sink_handle_t wakeword_sink;
+    wakeword_handler_t *ww_handler;
 } capture_system_t;
 
-typedef struct {
+typedef struct
+{
     audio_render_handle_t audio_render;
-    av_render_handle_t    player;
+    av_render_handle_t player;
 } player_system_t;
 
 static capture_system_t capture_sys;
-static player_system_t  player_sys;
+static player_system_t player_sys;
+
+static int build_wakeword_system(void)
+{
+    // Setup wake word sink with raw PCM audio
+    esp_capture_sink_cfg_t ww_sink_cfg = {
+        .audio_info = {
+            .format_id = ESP_CAPTURE_FMT_ID_PCM,
+            .sample_rate = 16000,
+            .channel = 1, // Wake word processing uses single channel
+            .bits_per_sample = 16,
+        },
+    };
+
+    int ret = esp_capture_sink_setup(capture_sys.capture_handle, 1, &ww_sink_cfg, &capture_sys.wakeword_sink);
+    if (ret != ESP_CAPTURE_ERR_OK)
+    {
+        ESP_LOGE(TAG, "Failed to setup wake word sink: %d", ret);
+        return ret;
+    }
+
+    ret = esp_capture_sink_enable(capture_sys.wakeword_sink, ESP_CAPTURE_RUN_MODE_ALWAYS);
+    if (ret != ESP_CAPTURE_ERR_OK)
+    {
+        ESP_LOGE(TAG, "Failed to enable wake word sink: %d", ret);
+        return ret;
+    }
+
+    // Initialize wake word handler
+    wakeword_config_t ww_config = {
+        .sample_rate = 16000,
+        .channel = 1,
+        .bits_per_sample = 16,
+    };
+
+    capture_sys.ww_handler = wakeword_handler_create(&ww_config);
+    if (capture_sys.ww_handler == NULL)
+    {
+        ESP_LOGE(TAG, "Failed to create wake word handler");
+        return -1;
+    }
+
+    ret = wakeword_handler_start(capture_sys.ww_handler, capture_sys.wakeword_sink);
+    if (ret != 0)
+    {
+        ESP_LOGE(TAG, "Failed to start wake word handler");
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "Wake word system initialized successfully");
+    return 0;
+}
 
 static int build_capture_system(void)
 {
@@ -56,12 +115,27 @@ static int build_capture_system(void)
     // capture_sys.aud_src = esp_capture_new_audio_dev_src(&codec_cfg);
     capture_sys.aud_src = esp_capture_new_audio_aec_src(&codec_cfg);
     RET_ON_NULL(capture_sys.aud_src, -1);
+
     // Create capture system
     esp_capture_cfg_t cfg = {
         .sync_mode = ESP_CAPTURE_SYNC_MODE_AUDIO,
         .audio_src = capture_sys.aud_src,
     };
-    esp_capture_open(&cfg, &capture_sys.capture_handle);
+    int ret = esp_capture_open(&cfg, &capture_sys.capture_handle);
+    if (ret != ESP_CAPTURE_ERR_OK)
+    {
+        ESP_LOGE(TAG, "Failed to open capture system: %d", ret);
+        return ret;
+    }
+
+    // Build wake word system after capture system is ready
+    ret = build_wakeword_system();
+    if (ret != 0)
+    {
+        ESP_LOGW(TAG, "Wake word system initialization failed, continuing without it");
+        // Don't fail the entire system if wake word fails
+    }
+
     return 0;
 }
 
@@ -71,7 +145,8 @@ static int build_player_system()
         .play_handle = get_playback_handle(),
     };
     player_sys.audio_render = av_render_alloc_i2s_render(&i2s_cfg);
-    if (player_sys.audio_render == NULL) {
+    if (player_sys.audio_render == NULL)
+    {
         ESP_LOGE(TAG, "Fail to create audio render");
         return -1;
     }
@@ -83,7 +158,8 @@ static int build_player_system()
         .allow_drop_data = false,
     };
     player_sys.player = av_render_open(&render_cfg);
-    if (player_sys.player == NULL) {
+    if (player_sys.player == NULL)
+    {
         ESP_LOGE(TAG, "Fail to create player");
         return -1;
     }
@@ -122,6 +198,17 @@ int media_sys_get_provider(esp_webrtc_media_provider_t *provide)
     return 0;
 }
 
+int media_sys_cleanup(void)
+{
+    if (capture_sys.ww_handler)
+    {
+        wakeword_handler_stop(capture_sys.ww_handler);
+        wakeword_handler_destroy(capture_sys.ww_handler);
+        capture_sys.ww_handler = NULL;
+    }
+    return 0;
+}
+
 int test_capture_to_player(void)
 {
     esp_capture_sink_cfg_t sink_cfg = {
@@ -146,12 +233,14 @@ int test_capture_to_player(void)
 
     uint32_t start_time = (uint32_t)(esp_timer_get_time() / 1000);
     esp_capture_start(capture_sys.capture_handle);
-    while ((uint32_t)(esp_timer_get_time() / 1000) < start_time + 20000) {
+    while ((uint32_t)(esp_timer_get_time() / 1000) < start_time + 20000)
+    {
         media_lib_thread_sleep(30);
         esp_capture_stream_frame_t frame = {
             .stream_type = ESP_CAPTURE_STREAM_TYPE_AUDIO,
         };
-        while (esp_capture_sink_acquire_frame(capture_path, &frame, true) == ESP_CAPTURE_ERR_OK) {
+        while (esp_capture_sink_acquire_frame(capture_path, &frame, true) == ESP_CAPTURE_ERR_OK)
+        {
             av_render_audio_data_t audio_data = {
                 .data = frame.data,
                 .size = frame.size,

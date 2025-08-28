@@ -1,4 +1,4 @@
-/* OpenAI realtime communication test
+/* OpenAI realtime communication test with Wake Word
 
    This example code is in the Public Domain (or CC0 licensed, at your option.)
 
@@ -39,7 +39,11 @@ static int start_chat(int argc, char **argv)
 
 static int stop_chat(int argc, char **argv)
 {
-    RUN_ASYNC(stop, { stop_webrtc(); });
+    RUN_ASYNC(stop, {
+        stop_webrtc();
+        // Clean up media system including wake word
+        media_sys_cleanup();
+    });
     return 0;
 }
 
@@ -57,7 +61,8 @@ static int sys_cli(int argc, char **argv)
 
 static int wifi_cli(int argc, char **argv)
 {
-    if (argc < 1) {
+    if (argc < 1)
+    {
         return -1;
     }
     char *ssid = argv[1];
@@ -83,9 +88,17 @@ static int rec2play_cli(int argc, char **argv)
 
 static int text_cli(int argc, char **argv)
 {
-    if (argc > 1) {
+    if (argc > 1)
+    {
         openai_send_text(argv[1]);
     }
+    return 0;
+}
+
+static int wakeword_cli(int argc, char **argv)
+{
+    printf("Wake word detection is running automatically in the background.\n");
+    printf("Speak your wake word to see detection logs.\n");
     return 0;
 }
 
@@ -149,8 +162,14 @@ static int init_console()
             .help = "Play recorded voice\r\n",
             .func = rec2play_cli,
         },
+        {
+            .command = "ww",
+            .help = "Wake word detection info\r\n",
+            .func = wakeword_cli,
+        },
     };
-    for (int i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++) {
+    for (int i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++)
+    {
         ESP_ERROR_CHECK(esp_console_cmd_register(&cmds[i]));
     }
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
@@ -159,7 +178,8 @@ static int init_console()
 
 static void thread_scheduler(const char *thread_name, media_lib_thread_cfg_t *schedule_cfg)
 {
-    if (strcmp(thread_name, "venc_0") == 0) {
+    if (strcmp(thread_name, "venc_0") == 0)
+    {
         // For H264 may need huge stack if use hardware encoder can set it to small value
         schedule_cfg->priority = 10;
 #if CONFIG_IDF_TARGET_ESP32S3
@@ -167,38 +187,58 @@ static void thread_scheduler(const char *thread_name, media_lib_thread_cfg_t *sc
 #endif
     }
 #ifdef WEBRTC_SUPPORT_OPUS
-    else if (strcmp(thread_name, "aenc_0") == 0) {
+    else if (strcmp(thread_name, "aenc_0") == 0)
+    {
         // For OPUS encoder it need huge stack, when use G711 can set it to small value
         schedule_cfg->stack_size = 40 * 1024;
         schedule_cfg->priority = 10;
         schedule_cfg->core_id = 1;
-    } else if (strcmp(thread_name, "buffer_in") == 0) {
+    }
+    else if (strcmp(thread_name, "buffer_in") == 0)
+    {
         schedule_cfg->stack_size = 6 * 1024;
         schedule_cfg->priority = 10;
         schedule_cfg->core_id = 0;
     }
 #endif
-    else if (strcmp(thread_name, "AUD_SRC") == 0) {
- #ifdef WEBRTC_SUPPORT_OPUS
+    else if (strcmp(thread_name, "AUD_SRC") == 0)
+    {
+#ifdef WEBRTC_SUPPORT_OPUS
         schedule_cfg->stack_size = 40 * 1024;
 #endif
         schedule_cfg->priority = 15;
-    } else if (strcmp(thread_name, "pc_task") == 0) {
+    }
+    else if (strcmp(thread_name, "pc_task") == 0)
+    {
         schedule_cfg->stack_size = 25 * 1024;
         schedule_cfg->priority = 18;
         schedule_cfg->core_id = 1;
-    } else if (strcmp(thread_name, "pc_send") == 0) {
+    }
+    else if (strcmp(thread_name, "pc_send") == 0)
+    {
         schedule_cfg->stack_size = 4 * 1024;
         schedule_cfg->priority = 15;
         schedule_cfg->core_id = 1;
-    } else if (strcmp(thread_name, "Adec") == 0) {
+    }
+    else if (strcmp(thread_name, "Adec") == 0)
+    {
         schedule_cfg->stack_size = 40 * 1024;
         schedule_cfg->priority = 15;
         schedule_cfg->core_id = 0;
-    }else if (strcmp(thread_name, "ARender") == 0) {
+    }
+    else if (strcmp(thread_name, "ARender") == 0)
+    {
         schedule_cfg->priority = 20;
     }
-    if (strcmp(thread_name, "start") == 0) {
+    else if (strcmp(thread_name, "wakeword_task") == 0)
+    {
+        // Wake word detection task configuration
+        schedule_cfg->stack_size = 8 * 1024;
+        schedule_cfg->priority = 5; // Lower priority than audio processing
+        schedule_cfg->core_id = 0;  // Run on core 0
+    }
+    if (strcmp(thread_name, "start") == 0)
+    {
         schedule_cfg->stack_size = 6 * 1024;
     }
 }
@@ -220,9 +260,12 @@ static void capture_scheduler(const char *name, esp_capture_thread_schedule_cfg_
 static int network_event_handler(bool connected)
 {
     // Run async so that not block wifi event callback
-    if (connected) {
+    if (connected)
+    {
         RUN_ASYNC(start, { start_webrtc(); });
-    } else {
+    }
+    else
+    {
         RUN_ASYNC(stop, { stop_webrtc(); });
     }
     return 0;
@@ -238,7 +281,8 @@ void app_main(void)
     media_sys_buildup();
     init_console();
     network_init(WIFI_SSID, WIFI_PASSWORD, network_event_handler);
-    while (1) {
+    while (1)
+    {
         media_lib_thread_sleep(2000);
         query_webrtc();
     }

@@ -10,7 +10,8 @@
 #pragma once
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
 #include "settings.h"
@@ -19,65 +20,73 @@ extern "C" {
 #include "sys_state.h"
 #include "esp_webrtc.h"
 
-/**
- * @brief  Initialize board
- */
-void init_board(void);
+   /**
+    * @brief  Initialize board
+    */
+   void init_board(void);
 
-/**
- * @brief  OpenAI signaling configuration
- *
- * @note   Details see: https://platform.openai.com/docs/api-reference/realtime-sessions/create#realtime-sessions-create-voice
- */
-typedef struct {
-   char *token; /*!< OpenAI token */
-   char *voice; /*!< Voice to select */
-} openai_signaling_cfg_t;
+   /**
+    * @brief  OpenAI signaling configuration
+    *
+    * @note   Details see: https://platform.openai.com/docs/api-reference/realtime-sessions/create#realtime-sessions-create-voice
+    */
+   typedef struct
+   {
+      char *token; /*!< OpenAI token */
+      char *voice; /*!< Voice to select */
+   } openai_signaling_cfg_t;
 
-/**
- * @brief  Get OpenAI signaling implementation
- *
- * @return
- *      - NULL    Not enough memory
- *      - Others  OpenAI signaling implementation
- */
-const esp_peer_signaling_impl_t *esp_signaling_get_openai_signaling(void);
+   /**
+    * @brief  Get OpenAI signaling implementation
+    *
+    * @return
+    *      - NULL    Not enough memory
+    *      - Others  OpenAI signaling implementation
+    */
+   const esp_peer_signaling_impl_t *esp_signaling_get_openai_signaling(void);
 
-/**
- * @brief  Start WebRTC
- *
- * @return
- *      - 0       On success
- *      - Others  Fail to start
- */
-int start_webrtc(void);
+   /**
+    * @brief  Start WebRTC
+    *
+    * @return
+    *      - 0       On success
+    *      - Others  Fail to start
+    */
+   int start_webrtc(void);
 
-/**
- * @brief  Send text to OpenAI server
- *
- * @param[in]  text  Text to be sent
- *
- * @return
- *      - 0       On success
- *      - Others  Fail to start
- */
-int openai_send_text(char *text);
+   /**
+    * @brief  Send text to OpenAI server
+    *
+    * @param[in]  text  Text to be sent
+    *
+    * @return
+    *      - 0       On success
+    *      - Others  Fail to start
+    */
+   int openai_send_text(char *text);
 
-/**
- * @brief  Query WebRTC status
- */
-void query_webrtc(void);
+   /**
+    * @brief  Query WebRTC status
+    */
+   void query_webrtc(void);
 
-/**
- * @brief  Start WebRTC
- *
- * @param[in]  url  Signaling URL
- *
- * @return
- *      - 0       On success
- *      - Others  Fail to start
- */
-int stop_webrtc(void);
+   /**
+    * @brief  Start WebRTC
+    *
+    * @param[in]  url  Signaling URL
+    *
+    * @return
+    *      - 0       On success
+    *      - Others  Fail to start
+    */
+   int stop_webrtc(void);
+
+   /**
+    * @brief Clean up media system resources including wake word handler
+    *
+    * @return int 0 on success
+    */
+   int media_sys_cleanup(void);
 
 #ifdef __cplusplus
 }
