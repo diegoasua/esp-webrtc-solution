@@ -299,11 +299,16 @@ static int send_function_desc(void)
     cJSON_AddBoolToObject(turn_detection, "interrupt_response", true);
     cJSON_AddItemToObject(session, "turn_detection", turn_detection);
 
+    // These should be outside the loop
+    cJSON_AddNullToObject(session, "input_audio_transcription");
+    cJSON *tools = cJSON_CreateArray();
+    cJSON_AddItemToObject(session, "tools", tools);
+
     class_t *iter = classes;
     while (iter)
     {
-        cJSON_AddNullToObject(session, "input_audio_transcription");
-        cJSON *tools = cJSON_CreateArray();
+        // Create the tool object here
+        cJSON *tool = cJSON_CreateObject();
         cJSON_AddItemToArray(tools, tool);
         cJSON_AddStringToObject(tool, "type", "function");
         cJSON_AddStringToObject(tool, "name", iter->name);
