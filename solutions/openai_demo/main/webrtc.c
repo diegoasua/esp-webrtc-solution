@@ -302,7 +302,8 @@ static int send_function_desc(void)
     class_t *iter = classes;
     while (iter)
     {
-        cJSON *tool = cJSON_CreateObject();
+        cJSON_AddNullToObject(session, "input_audio_transcription");
+        cJSON *tools = cJSON_CreateArray();
         cJSON_AddItemToArray(tools, tool);
         cJSON_AddStringToObject(tool, "type", "function");
         cJSON_AddStringToObject(tool, "name", iter->name);
