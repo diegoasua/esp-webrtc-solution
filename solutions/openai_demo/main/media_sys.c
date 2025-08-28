@@ -131,7 +131,7 @@ static int build_capture_system(void)
         return ret;
     }
 
-    // Build wake word system after capture system is ready
+    esp_capture_start(capture_sys.capture_handle);
     ret = build_wakeword_system();
     if (ret != 0)
     {
