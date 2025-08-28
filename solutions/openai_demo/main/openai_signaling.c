@@ -125,31 +125,6 @@ static int openai_signaling_start(esp_peer_signaling_cfg_t *cfg, esp_peer_signal
     return ESP_PEER_ERR_NONE;
 }
 
-static int openai_signaling_start(esp_peer_signaling_cfg_t *cfg, esp_peer_signaling_handle_t *h)
-{
-    openai_signaling_t *sig = (openai_signaling_t *)calloc(1, sizeof(openai_signaling_t));
-    if (sig == NULL)
-    {
-        return ESP_PEER_ERR_NO_MEM;
-    }
-    openai_signaling_cfg_t *openai_cfg = (openai_signaling_cfg_t *)cfg->extra_cfg;
-    sig->cfg = *cfg;
-    // alloy, ash, ballad, coral, echo sage, shimmer and verse
-    get_ephemeral_token(sig, openai_cfg->token, openai_cfg->voice ? openai_cfg->voice : "alloy");
-    if (sig->ephemeral_token == NULL)
-    {
-        free(sig);
-        return ESP_PEER_ERR_NOT_SUPPORT;
-    }
-    *h = sig;
-    esp_peer_signaling_ice_info_t ice_info = {
-        .is_initiator = true,
-    };
-    sig->cfg.on_ice_info(&ice_info, sig->cfg.ctx);
-    sig->cfg.on_connected(sig->cfg.ctx);
-    return ESP_PEER_ERR_NONE;
-}
-
 static void openai_sdp_answer(http_resp_t *resp, void *ctx)
 {
     openai_signaling_t *sig = (openai_signaling_t *)ctx;
