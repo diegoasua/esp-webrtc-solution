@@ -1,4 +1,4 @@
-/* Wake Word Handler Implementation
+/* Wake Word Handler Implementation - FIXED VERSION
 
    This example code is in the Public Domain (or CC0 licensed, at your option.)
 
@@ -47,7 +47,7 @@ static void default_wakeword_callback(int model_index, int word_index, void *ctx
 
 static int initialize_afe_models(wakeword_handler_t *handler)
 {
-    // Initialize SR models (similar to your working example)
+    // Initialize SR models
     handler->models = esp_srmodel_init("model");
     if (handler->models == NULL)
     {
@@ -64,12 +64,12 @@ static int initialize_afe_models(wakeword_handler_t *handler)
         }
     }
 
-    // Create AFE config - using correct input format parameter
-    // Common formats: "16000_16_1" (16kHz, 16-bit, mono) or "16000_32_2" (16kHz, 32-bit, stereo)
-    const char *input_format = "16000_16_1"; // Adjust based on your audio input configuration
-
+    // Create AFE config with proper channel format
+    // For ESP32S3 with ES7210 in TDM mode (4 channels total, using channels 1&2)
+    // Format: "MMRR" where M=microphone, R=reference, channels 0,1,2,3
+    // Since you're using channels 1&2 as per your capture config, use "NMMN"
     afe_config_t *afe_config = afe_config_init(
-        input_format, // Use string format instead of function call
+        "NMMN", // 4 channels: N(unused), M(mic1), M(mic2), N(unused)
         handler->models,
         AFE_TYPE_SR,
         AFE_MODE_LOW_COST);
@@ -130,39 +130,48 @@ static void wakeword_task(void *arg)
             .stream_type = ESP_CAPTURE_STREAM_TYPE_AUDIO,
         };
 
-        // Acquire audio frame from the capture sink
-        if (esp_capture_sink_acquire_frame(handler->sink, &frame, true) == ESP_CAPTURE_ERR_OK)
+        // Acquire audio frame from the capture sink with timeout
+        int ret = esp_capture_sink_acquire_frame(handler->sink, &frame, false);
+        if (ret == ESP_CAPTURE_ERR_OK)
         {
             // Feed audio data to AFE for processing
-            if (handler->afe_handle && handler->afe_data)
+            if (handler->afe_handle && handler->afe_data && frame.data != NULL && frame.size > 0)
             {
                 // AFE expects 16-bit samples
                 int16_t *audio_samples = (int16_t *)frame.data;
                 int sample_count = frame.size / sizeof(int16_t);
 
-                // Feed audio in chunks if needed
+                // Get feed chunk size from AFE
                 int chunk_size = handler->afe_handle->get_feed_chunksize(handler->afe_data);
 
+                // Process audio in chunks
                 for (int i = 0; i < sample_count; i += chunk_size)
                 {
+                    if (!handler->running)
+                        break;
+
                     int remaining = sample_count - i;
-                    // Feed the audio chunk to AFE
-                    handler->afe_handle->feed(handler->afe_data, &audio_samples[i]);
-
-                    // Fetch detection results
-                    afe_fetch_result_t *result = handler->afe_handle->fetch(handler->afe_data);
-                    if (result && result->ret_value != ESP_FAIL)
+                    if (remaining >= chunk_size)
                     {
-                        if (result->wakeup_state == WAKENET_DETECTED)
-                        {
-                            ESP_LOGI(TAG, "Wake word detected!");
+                        // Feed the audio chunk to AFE
+                        handler->afe_handle->feed(handler->afe_data, &audio_samples[i]);
 
-                            // Call the callback function
-                            if (handler->callback)
+                        // Fetch detection results
+                        afe_fetch_result_t *result = handler->afe_handle->fetch(handler->afe_data);
+                        if (result && result->ret_value != ESP_FAIL)
+                        {
+                            if (result->wakeup_state == WAKENET_DETECTED)
                             {
-                                handler->callback(result->wakenet_model_index,
-                                                  result->wake_word_index,
-                                                  handler->callback_ctx);
+                                ESP_LOGI(TAG, "Wake word detected! Model: %d, Word: %d",
+                                         result->wakenet_model_index, result->wake_word_index);
+
+                                // Call the callback function
+                                if (handler->callback)
+                                {
+                                    handler->callback(result->wakenet_model_index,
+                                                      result->wake_word_index,
+                                                      handler->callback_ctx);
+                                }
                             }
                         }
                     }
@@ -171,6 +180,10 @@ static void wakeword_task(void *arg)
 
             // Release the frame back to the capture system
             esp_capture_sink_release_frame(handler->sink, &frame);
+        }
+        else if (ret != ESP_CAPTURE_ERR_TIMEOUT)
+        {
+            ESP_LOGW(TAG, "Failed to acquire frame: %d", ret);
         }
 
         // Small delay to prevent excessive CPU usage

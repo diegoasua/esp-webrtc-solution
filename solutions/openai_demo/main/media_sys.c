@@ -53,23 +53,26 @@ static player_system_t player_sys;
 
 static int build_wakeword_system(void)
 {
-    // Setup wake word sink with raw PCM audio
+    // Setup wake word sink with raw PCM audio matching your capture system
+    // Use same format as your capture system but for wake word processing
     esp_capture_sink_cfg_t ww_sink_cfg = {
         .audio_info = {
-            .format_id = ESP_CAPTURE_FMT_ID_PCM,
+            .format_id = ESP_CAPTURE_FMT_ID_PCM, // Raw PCM for AFE processing
             .sample_rate = 16000,
-            .channel = 1, // Wake word processing uses single channel
+            .channel = 4, // Match your ES7210 TDM configuration (4 channels)
             .bits_per_sample = 16,
         },
     };
 
-    int ret = esp_capture_sink_setup(capture_sys.capture_handle, 1, &ww_sink_cfg, &capture_sys.wakeword_sink);
+    // Create wake word sink on a different stream index than WebRTC
+    int ret = esp_capture_sink_setup(capture_sys.capture_handle, 2, &ww_sink_cfg, &capture_sys.wakeword_sink);
     if (ret != ESP_CAPTURE_ERR_OK)
     {
         ESP_LOGE(TAG, "Failed to setup wake word sink: %d", ret);
         return ret;
     }
 
+    // Enable the wake word sink
     ret = esp_capture_sink_enable(capture_sys.wakeword_sink, ESP_CAPTURE_RUN_MODE_ALWAYS);
     if (ret != ESP_CAPTURE_ERR_OK)
     {
@@ -77,10 +80,10 @@ static int build_wakeword_system(void)
         return ret;
     }
 
-    // Initialize wake word handler
+    // Initialize wake word handler with proper configuration
     wakeword_config_t ww_config = {
         .sample_rate = 16000,
-        .channel = 1,
+        .channel = 4, // Match the sink configuration
         .bits_per_sample = 16,
     };
 
@@ -94,7 +97,7 @@ static int build_wakeword_system(void)
     ret = wakeword_handler_start(capture_sys.ww_handler, capture_sys.wakeword_sink);
     if (ret != 0)
     {
-        ESP_LOGE(TAG, "Failed to start wake word handler");
+        ESP_LOGE(TAG, "Failed to start wake word handler: %d", ret);
         return ret;
     }
 
