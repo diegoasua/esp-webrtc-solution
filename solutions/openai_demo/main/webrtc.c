@@ -297,9 +297,9 @@ static int send_function_desc(void)
     cJSON_AddNumberToObject(turn_detection, "silence_duration_ms", 1500); // Wait 1.5 seconds of silence (default 500ms)
     cJSON_AddBoolToObject(turn_detection, "create_response", true);
     cJSON_AddBoolToObject(turn_detection, "interrupt_response", true);
-    cJSON_AddItemToObject(session, "turn_detection", turn_detection)
+    cJSON_AddItemToObject(session, "turn_detection", turn_detection);
 
-        class_t *iter = classes;
+    class_t *iter = classes;
     while (iter)
     {
         cJSON *tool = cJSON_CreateObject();
