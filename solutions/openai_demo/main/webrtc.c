@@ -287,8 +287,16 @@ static int send_function_desc(void)
     cJSON *modalities = cJSON_CreateArray();
     cJSON_AddItemToArray(modalities, cJSON_CreateString("text"));
     cJSON_AddItemToArray(modalities, cJSON_CreateString("audio"));
-
     cJSON_AddItemToObject(session, "modalities", modalities);
+
+    // Add semantic VAD configuration
+    cJSON *turn_detection = cJSON_CreateObject();
+    cJSON_AddStringToObject(turn_detection, "type", "semantic_vad");
+    cJSON_AddStringToObject(turn_detection, "eagerness", "medium"); // Options: "low", "medium", "high", "auto"
+    cJSON_AddBoolToObject(turn_detection, "create_response", true);
+    cJSON_AddBoolToObject(turn_detection, "interrupt_response", true);
+    cJSON_AddItemToObject(session, "turn_detection", turn_detection);
+
     cJSON_AddNullToObject(session, "input_audio_transcription");
     cJSON *tools = cJSON_CreateArray();
     cJSON_AddItemToObject(session, "tools", tools);

@@ -79,27 +79,18 @@ static void get_ephemeral_token(openai_signaling_t *sig, char *token, char *voic
     int len = strlen("Authorization: Bearer ") + strlen(token) + 1;
     char auth[len];
     snprintf(auth, len, "Authorization: Bearer %s", token);
-    char *header[] = {content_type, auth, NULL};
-
+    char *header[] = {
+        content_type,
+        auth,
+        NULL,
+    };
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "model", OPENAI_REALTIME_MODEL);
-
     cJSON *modalities = cJSON_CreateArray();
     cJSON_AddItemToArray(modalities, cJSON_CreateString("text"));
     cJSON_AddItemToArray(modalities, cJSON_CreateString("audio"));
     cJSON_AddItemToObject(root, "modalities", modalities);
-
     cJSON_AddStringToObject(root, "voice", voice);
-
-    // ✅ Configure VAD once, at session creation
-    cJSON *turn_detection = cJSON_CreateObject();
-    cJSON_AddStringToObject(turn_detection, "type", "semantic_vad");
-    cJSON_AddStringToObject(turn_detection, "eagerness", "mediun"); // or "low" or "high"
-    // Optional in conversation mode:
-    // cJSON_AddBoolToObject(turn_detection, "create_response", true);
-    // cJSON_AddBoolToObject(turn_detection, "interrupt_response", true);
-    cJSON_AddItemToObject(root, "turn_detection", turn_detection);
-
     char *json_string = cJSON_Print(root);
     if (json_string)
     {
@@ -107,6 +98,31 @@ static void get_ephemeral_token(openai_signaling_t *sig, char *token, char *voic
         free(json_string);
     }
     cJSON_Delete(root);
+}
+
+static int openai_signaling_start(esp_peer_signaling_cfg_t *cfg, esp_peer_signaling_handle_t *h)
+{
+    openai_signaling_t *sig = (openai_signaling_t *)calloc(1, sizeof(openai_signaling_t));
+    if (sig == NULL)
+    {
+        return ESP_PEER_ERR_NO_MEM;
+    }
+    openai_signaling_cfg_t *openai_cfg = (openai_signaling_cfg_t *)cfg->extra_cfg;
+    sig->cfg = *cfg;
+    // alloy, ash, ballad, coral, echo sage, shimmer and verse
+    get_ephemeral_token(sig, openai_cfg->token, openai_cfg->voice ? openai_cfg->voice : "alloy");
+    if (sig->ephemeral_token == NULL)
+    {
+        free(sig);
+        return ESP_PEER_ERR_NOT_SUPPORT;
+    }
+    *h = sig;
+    esp_peer_signaling_ice_info_t ice_info = {
+        .is_initiator = true,
+    };
+    sig->cfg.on_ice_info(&ice_info, sig->cfg.ctx);
+    sig->cfg.on_connected(sig->cfg.ctx);
+    return ESP_PEER_ERR_NONE;
 }
 
 static int openai_signaling_start(esp_peer_signaling_cfg_t *cfg, esp_peer_signaling_handle_t *h)
