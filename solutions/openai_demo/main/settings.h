@@ -45,7 +45,7 @@ extern "C" {
 /**
  * @brief  Set default playback volume
  */
-#define DEFAULT_PLAYBACK_VOL (85)
+#define DEFAULT_PLAYBACK_VOL (100)
 
 #ifdef __cplusplus
 }
