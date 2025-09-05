@@ -18,8 +18,8 @@
 #define TAG                   "OPENAI_SIGNALING"
 
 // Prefer to use mini model currently
-#define OPENAI_REALTIME_MODEL "gpt-4o-mini-realtime-preview-2024-12-17"
-#define OPENAI_REALTIME_URL   "https://api.openai.com/v1/realtime?model=" OPENAI_REALTIME_MODEL
+#define OPENAI_REALTIME_MODEL "gpt-realtime"
+#define OPENAI_REALTIME_URL   "https://api.openai.com/v1/realtime/calls?model=" OPENAI_REALTIME_MODEL
 
 #define SAFE_FREE(p) if (p) {   \
     free(p);                    \
