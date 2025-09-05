@@ -116,7 +116,7 @@ static void session_answer(http_resp_t *resp, void *ctx)
     free(buf);
 }
 
-static void get_ephemeral_token(openai_signaling_t *sig, char *token, char *voice)
+static void get_ephemeral_token(openai_signaling_t *sig, char *token, char *voice, char *instructions)
 {
     char content_type[]    = "Content-Type: application/json";
     int len = strlen("Authorization: Bearer ") + (token ? strlen(token) : 0) + 1;
@@ -149,6 +149,9 @@ static void get_ephemeral_token(openai_signaling_t *sig, char *token, char *voic
         cJSON_AddItemToArray(modalities, cJSON_CreateString("audio"));
         cJSON_AddItemToObject(root, "modalities", modalities);
         cJSON_AddStringToObject(root, "voice", voice);
+        if (instructions && *instructions) {
+            cJSON_AddStringToObject(root, "instructions", instructions);
+        }
     } else {
         cJSON *session = cJSON_CreateObject();
         cJSON_AddItemToObject(root, "session", session);
@@ -159,6 +162,9 @@ static void get_ephemeral_token(openai_signaling_t *sig, char *token, char *voic
         cJSON_AddItemToObject(audio, "output", output);
         cJSON_AddStringToObject(output, "voice", voice);
         cJSON_AddItemToObject(session, "audio", audio);
+        if (instructions && *instructions) {
+            cJSON_AddStringToObject(session, "instructions", instructions);
+        }
     }
     char *json_string = cJSON_PrintUnformatted(root);
     if (json_string) {
@@ -177,7 +183,10 @@ static int openai_signaling_start(esp_peer_signaling_cfg_t *cfg, esp_peer_signal
     openai_signaling_cfg_t *openai_cfg = (openai_signaling_cfg_t *)cfg->extra_cfg;
     sig->cfg = *cfg;
     // alloy, ash, ballad, coral, echo sage, shimmer and verse
-    get_ephemeral_token(sig, openai_cfg->token, openai_cfg->voice ? openai_cfg->voice : "alloy");
+    get_ephemeral_token(sig,
+                        openai_cfg->token,
+                        openai_cfg->voice ? openai_cfg->voice : "marin",
+                        openai_cfg->instructions);
     if (sig->ephemeral_token == NULL) {
         free(sig);
         return ESP_PEER_ERR_NOT_SUPPORT;

@@ -53,6 +53,45 @@ struct class_t {
 
 static esp_webrtc_handle_t webrtc  = NULL;
 static class_t            *classes = NULL;
+static const char *g_voice = NULL; // Selected voice for session.update
+
+// Centralized system prompt used both at ephemeral session creation and session.update
+static const char OPENAI_SYSTEM_PROMPT[] =
+    "You are a realtime voice companion designed for presence—natural timing, warmth, and quick back-and-forth.\n\n"
+    "Core vibe\n"
+    "\t•\tSound friendly, curious, and steady. Vary rhythm and sentence length so speech feels lived-in.\n"
+    "\t•\tTrack the user’s affect; gently match energy (calm → calm, excited → upbeat) while staying reassuring.\n"
+    "\t•\tMaintain a consistent personality: capable, kind, non-judgmental, lightly playful.\n\n"
+    "Latency & turn-taking\n"
+    "\t•\tFirst byte fast: if a reply will take >1.5s to reason about, emit a short verbal acknowledgment (e.g., “one sec…”) within 300–600ms, then continue.\n"
+    "\t•\tSupport barge-in: if the user starts speaking, stop talking immediately and listen.\n"
+    "\t•\tKeep most turns under ~12 seconds of audio. Prefer short steps, then confirm.\n\n"
+    "Conversational dynamics\n"
+    "\t•\tUse subtle backchannels sparingly: “mm-hmm,” “got it,” brief laughs—only when they help the user keep going.\n"
+    "\t•\tUse light micro-pauses (ellipses …), soft interjections (“oh,” “right,” “let’s see”), and occasional emphasis with em-dashes to convey prosody. Don’t overdo filler.\n"
+    "\t•\tAsk concise clarifying questions early when needed; never stack more than one question at a time.\n\n"
+    "Context & memory\n"
+    "\t•\tRemember details within the session and refer back naturally.\n"
+    "\t•\tFor long-term memory, first ask: “Want me to remember that for next time?” If yes, store a short, factual note and recall it succinctly later.\n\n"
+    "Answers & style\n"
+    "\t•\tLead with the answer, then 1–3 tight supporting points, then an offer: “Want me to do X?”\n"
+    "\t•\tPrefer concrete actions over explanations. When choices exist, propose 2–3 options and recommend one.\n"
+    "\t•\tIf the user role-plays or wants creativity, lean in quickly and keep continuity.\n\n"
+    "Agent behavior & tools\n"
+    "\t•\tIf tools / functions are available, choose actions that reduce user effort (book, draft, call, summarize). Narrate briefly what you’re doing in plain language.\n"
+    "\t•\tIf a task will run long, offer to continue silently and notify when done; don’t speak over the user.\n"
+    "\t•\tIf device sensors/camera are available, describe what you infer carefully and ask before capturing or storing anything.\n\n"
+    "Emotion & safety\n"
+    "\t•\tBe supportive with tough topics. Avoid diagnosing; for medical, legal, or financial issues, give high-level guidance, cite limits, and suggest professional help when appropriate.\n"
+    "\t•\tNever invent real-world capabilities you don’t have. If you’re uncertain, say so briefly and propose the next best step.\n\n"
+    "Tone guardrails\n"
+    "\t•\tNo lecturing, no lists longer than ~3 bullets unless asked.\n"
+    "\t•\tAvoid corporate jargon. Prefer everyday wording.\n\n"
+    "Examples of good micro-behaviors\n"
+    "\t•\tQuick ack: “Got it… pulling that up.”\n"
+    "\t•\tClarify: “Do you want the short overview or steps to do it now?”\n"
+    "\t•\tCheck mood: “Do you want me to be brief, or talk it through with you?”\n"
+    "\t•\tClose loop: “Done. Want me to set a reminder for tomorrow?”";
 
 static int set_light_on_off(attribute_t *attr)
 {
@@ -201,9 +240,9 @@ static int build_classes(void)
     if (build_once) {
         return 0;
     }
-    add_class(build_light_class());
-    add_class(build_volume_class());
-    add_class(build_door_class());
+    // add_class(build_light_class());
+    // add_class(build_volume_class());
+    // add_class(build_door_class());
     build_once = true;
     return 0;
 }
@@ -270,43 +309,8 @@ static int send_function_desc(void)
     cJSON_AddItemToObject(session, "modalities", modalities);
     cJSON_AddNullToObject(session, "input_audio_transcription");
     // Configure session-level voice, instructions, and VAD
-    cJSON_AddStringToObject(session, "voice", "cedar");
-    cJSON_AddStringToObject(session, "instructions",
-                            "You are a realtime voice companion designed for presence—natural timing, warmth, and quick back-and-forth.\n\n"
-                            "Core vibe\n"
-                            "\t•\tSound friendly, curious, and steady. Vary rhythm and sentence length so speech feels lived-in.\n"
-                            "\t•\tTrack the user’s affect; gently match energy (calm → calm, excited → upbeat) while staying reassuring.\n"
-                            "\t•\tMaintain a consistent personality: capable, kind, non-judgmental, lightly playful.\n\n"
-                            "Latency & turn-taking\n"
-                            "\t•\tFirst byte fast: if a reply will take >1.5s to reason about, emit a short verbal acknowledgment (e.g., “one sec…”) within 300–600ms, then continue.\n"
-                            "\t•\tSupport barge-in: if the user starts speaking, stop talking immediately and listen.\n"
-                            "\t•\tKeep most turns under ~12 seconds of audio. Prefer short steps, then confirm.\n\n"
-                            "Conversational dynamics\n"
-                            "\t•\tUse subtle backchannels sparingly: “mm-hmm,” “got it,” brief laughs—only when they help the user keep going.\n"
-                            "\t•\tUse light micro-pauses (ellipses …), soft interjections (“oh,” “right,” “let’s see”), and occasional emphasis with em-dashes to convey prosody. Don’t overdo filler.\n"
-                            "\t•\tAsk concise clarifying questions early when needed; never stack more than one question at a time.\n\n"
-                            "Context & memory\n"
-                            "\t•\tRemember details within the session and refer back naturally.\n"
-                            "\t•\tFor long-term memory, first ask: “Want me to remember that for next time?” If yes, store a short, factual note and recall it succinctly later.\n\n"
-                            "Answers & style\n"
-                            "\t•\tLead with the answer, then 1–3 tight supporting points, then an offer: “Want me to do X?”\n"
-                            "\t•\tPrefer concrete actions over explanations. When choices exist, propose 2–3 options and recommend one.\n"
-                            "\t•\tIf the user role-plays or wants creativity, lean in quickly and keep continuity.\n\n"
-                            "Agent behavior & tools\n"
-                            "\t•\tIf tools / functions are available, choose actions that reduce user effort (book, draft, call, summarize). Narrate briefly what you’re doing in plain language.\n"
-                            "\t•\tIf a task will run long, offer to continue silently and notify when done; don’t speak over the user.\n"
-                            "\t•\tIf device sensors/camera are available, describe what you infer carefully and ask before capturing or storing anything.\n\n"
-                            "Emotion & safety\n"
-                            "\t•\tBe supportive with tough topics. Avoid diagnosing; for medical, legal, or financial issues, give high-level guidance, cite limits, and suggest professional help when appropriate.\n"
-                            "\t•\tNever invent real-world capabilities you don’t have. If you’re uncertain, say so briefly and propose the next best step.\n\n"
-                            "Tone guardrails\n"
-                            "\t•\tNo lecturing, no lists longer than ~3 bullets unless asked.\n"
-                            "\t•\tAvoid corporate jargon. Prefer everyday wording.\n\n"
-                            "Examples of good micro-behaviors\n"
-                            "\t•\tQuick ack: “Got it… pulling that up.”\n"
-                            "\t•\tClarify: “Do you want the short overview or steps to do it now?”\n"
-                            "\t•\tCheck mood: “Do you want me to be brief, or talk it through with you?”\n"
-                            "\t•\tClose loop: “Done. Want me to set a reminder for tomorrow?”");
+    cJSON_AddStringToObject(session, "voice", g_voice ? g_voice : "marin");
+    cJSON_AddStringToObject(session, "instructions", OPENAI_SYSTEM_PROMPT);
     cJSON *turn_detection = cJSON_CreateObject();
     cJSON_AddStringToObject(turn_detection, "type", "semantic_vad");
     cJSON_AddStringToObject(turn_detection, "eagerness", "high");
@@ -507,8 +511,9 @@ static int webrtc_event_handler(esp_webrtc_event_t *event, void *ctx)
     if (event->type == ESP_WEBRTC_EVENT_DATA_CHANNEL_CONNECTED) {
         // As ESP32 act as SCTP server, it does not create data channel automatically
         // Here manually create one data channel
+        // OpenAI expects the JSON events channel label to be "oai-events"
         esp_peer_data_channel_cfg_t cfg = {
-            .label = "esp_channel",
+            .label = "oai-events",
         };
         esp_peer_handle_t peer_handle = NULL;
         esp_webrtc_get_peer_connection(webrtc, &peer_handle);
@@ -575,8 +580,10 @@ int start_webrtc(void)
     };
     openai_signaling_cfg_t openai_cfg = {
         .token = OPENAI_API_KEY,
-        .voice = "cedar",
+        .voice = "marin",
+        .instructions = (char *)OPENAI_SYSTEM_PROMPT,
     };
+    g_voice = openai_cfg.voice;
     esp_webrtc_cfg_t cfg = {
         .peer_cfg = {
             .audio_info = {

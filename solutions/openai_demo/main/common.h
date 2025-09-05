@@ -32,6 +32,7 @@ void init_board(void);
 typedef struct {
    char *token; /*!< OpenAI token */
    char *voice; /*!< Voice to select */
+   char *instructions; /*!< System prompt/instructions */
 } openai_signaling_cfg_t;
 
 /**
