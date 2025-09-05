@@ -17,9 +17,13 @@
 
 #define TAG                   "OPENAI_SIGNALING"
 
-// Prefer to use mini model currently
+// Realtime model + endpoints (calls API). Adjust if using different host/model.
 #define OPENAI_REALTIME_MODEL "gpt-realtime"
 #define OPENAI_REALTIME_URL   "https://api.openai.com/v1/realtime/calls?model=" OPENAI_REALTIME_MODEL
+// Ephemeral token endpoint; default to OpenAI Realtime Sessions
+#ifndef OPENAI_EPHEMERAL_URL
+#define OPENAI_EPHEMERAL_URL  "https://api.openai.com/v1/realtime/sessions"
+#endif
 
 #define SAFE_FREE(p) if (p) {   \
     free(p);                    \
@@ -47,46 +51,118 @@ static char *get_key_end(char *str, char *key, int len)
 static void session_answer(http_resp_t *resp, void *ctx)
 {
     openai_signaling_t *sig = (openai_signaling_t *)ctx;
-    char *token = GET_KEY_END((char *)resp->data, "\"client_secret\"");
-    if (token == NULL) {
+    if (resp == NULL || resp->data == NULL || resp->size <= 0) {
         return;
     }
-    char *secret = GET_KEY_END(token, "\"value\"");
-    if (secret == NULL) {
-        return;
+    // Ensure null-terminated buffer
+    char *buf = malloc(resp->size + 1);
+    if (!buf) return;
+    memcpy(buf, resp->data, resp->size);
+    buf[resp->size] = '\0';
+
+    // Trim leading/trailing whitespace
+    char *s = buf;
+    while (*s == ' ' || *s == '\n' || *s == '\r' || *s == '\t') s++;
+    char *end = s + strlen(s);
+    while (end > s && (end[-1] == ' ' || end[-1] == '\n' || end[-1] == '\r' || end[-1] == '\t')) {
+        *--end = '\0';
     }
-    char *s = strchr(secret, '"');
-    if (s == NULL) {
-        return;
+
+    char *token_out = NULL;
+    if (*s == '{') {
+        // JSON: support both { client_secret: { value } } and { value }
+        cJSON *root = cJSON_Parse(s);
+        if (root) {
+            cJSON *client_secret = cJSON_GetObjectItemCaseSensitive(root, "client_secret");
+            if (client_secret && cJSON_IsObject(client_secret)) {
+                cJSON *value = cJSON_GetObjectItemCaseSensitive(client_secret, "value");
+                if (value && cJSON_IsString(value)) {
+                    token_out = strdup(value->valuestring);
+                }
+            }
+            if (!token_out) {
+                cJSON *value = cJSON_GetObjectItemCaseSensitive(root, "value");
+                if (value && cJSON_IsString(value)) {
+                    token_out = strdup(value->valuestring);
+                }
+            }
+            if (!token_out) {
+                // Sometimes the token may be in "secret" or "token"
+                cJSON *value = cJSON_GetObjectItemCaseSensitive(root, "secret");
+                if (value && cJSON_IsString(value)) {
+                    token_out = strdup(value->valuestring);
+                }
+            }
+            cJSON_Delete(root);
+        }
+    } else {
+        // Plain token string, possibly quoted
+        if (*s == '"') {
+            s++;
+            char *q = strchr(s, '"');
+            if (q) *q = '\0';
+        }
+        token_out = strdup(s);
     }
-    s++;
-    char *e = strchr(s, '"');
-    *e = 0;
-    sig->ephemeral_token = strdup(s);
-    *e = '"';
+
+    if (token_out && token_out[0] != '\0') {
+        sig->ephemeral_token = token_out;
+    } else {
+        int show = 200;
+        if ((int)strlen(s) < show) show = strlen(s);
+        ESP_LOGE(TAG, "Failed to parse ephemeral token. Body preview: %.*s", show, s);
+        free(token_out);
+    }
+    free(buf);
 }
 
 static void get_ephemeral_token(openai_signaling_t *sig, char *token, char *voice)
 {
-    char content_type[32] = "Content-Type: application/json";
-    int len = strlen("Authorization: Bearer ") + strlen(token) + 1;
-    char auth[len];
-    snprintf(auth, len, "Authorization: Bearer %s", token);
-    char *header[] = {
-        content_type,
-        auth,
-        NULL,
-    };
+    char content_type[]    = "Content-Type: application/json";
+    int len = strlen("Authorization: Bearer ") + (token ? strlen(token) : 0) + 1;
+    char auth[256] = {0};
+    if (token && *token) {
+        snprintf(auth, sizeof(auth), "Authorization: Bearer %s", token);
+    }
+    char accept[]          = "Accept: text/plain, application/json";
+    char accept_encoding[] = "Accept-Encoding: identity";
+    char connection[]      = "Connection: close";
+    char user_agent[]      = "User-Agent: esp32-esp-webrtc";
+    char beta[]            = "OpenAI-Beta: realtime=v1";
+    char *header[8];
+    int h = 0;
+    header[h++] = content_type;
+    if (auth[0]) header[h++] = auth;
+    header[h++] = accept;
+    header[h++] = accept_encoding;
+    header[h++] = connection;
+    header[h++] = user_agent;
+    header[h++] = beta;
+    header[h++] = NULL;
+    // Build body for ephemeral creation. Use legacy shape for /realtime/sessions,
+    // and {"session":{...}} for custom endpoints.
     cJSON *root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root, "model", OPENAI_REALTIME_MODEL);
-    cJSON *modalities = cJSON_CreateArray();
-    cJSON_AddItemToArray(modalities, cJSON_CreateString("text"));
-    cJSON_AddItemToArray(modalities, cJSON_CreateString("audio"));
-    cJSON_AddItemToObject(root, "modalities", modalities);
-    cJSON_AddStringToObject(root, "voice", voice);
-    char *json_string = cJSON_Print(root);
+    if (strstr(OPENAI_EPHEMERAL_URL, "/realtime/sessions")) {
+        cJSON_AddStringToObject(root, "model", OPENAI_REALTIME_MODEL);
+        cJSON *modalities = cJSON_CreateArray();
+        cJSON_AddItemToArray(modalities, cJSON_CreateString("text"));
+        cJSON_AddItemToArray(modalities, cJSON_CreateString("audio"));
+        cJSON_AddItemToObject(root, "modalities", modalities);
+        cJSON_AddStringToObject(root, "voice", voice);
+    } else {
+        cJSON *session = cJSON_CreateObject();
+        cJSON_AddItemToObject(root, "session", session);
+        cJSON_AddStringToObject(session, "model", OPENAI_REALTIME_MODEL);
+        // Add audio.output.voice
+        cJSON *audio = cJSON_CreateObject();
+        cJSON *output = cJSON_CreateObject();
+        cJSON_AddItemToObject(audio, "output", output);
+        cJSON_AddStringToObject(output, "voice", voice);
+        cJSON_AddItemToObject(session, "audio", audio);
+    }
+    char *json_string = cJSON_PrintUnformatted(root);
     if (json_string) {
-        https_post("https://api.openai.com/v1/realtime/sessions", header, json_string, NULL, session_answer, sig);
+        https_post(OPENAI_EPHEMERAL_URL, header, json_string, NULL, session_answer, sig);
         free(json_string);
     }
     cJSON_Delete(root);
@@ -141,9 +217,19 @@ static int openai_signaling_send_msg(esp_peer_signaling_handle_t h, esp_peer_sig
         int len = strlen("Authorization: Bearer ") + strlen(token) + 1;
         char auth[len];
         snprintf(auth, len, "Authorization: Bearer %s", token);
+        char accept_sdp[]      = "Accept: application/sdp";
+        char accept_encoding[] = "Accept-Encoding: identity";
+        char connection[]      = "Connection: close";
+        char user_agent[]      = "User-Agent: esp32-esp-webrtc";
+        char beta[]            = "OpenAI-Beta: realtime=v1";
         char *header[] = {
             content_type,
             auth,
+            accept_sdp,
+            accept_encoding,
+            connection,
+            user_agent,
+            beta,
             NULL,
         };
         int ret = https_post(OPENAI_REALTIME_URL, header, (char *)msg->data, NULL, openai_sdp_answer, h);

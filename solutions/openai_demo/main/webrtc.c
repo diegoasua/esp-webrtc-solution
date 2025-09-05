@@ -269,7 +269,8 @@ static int send_function_desc(void)
 
     cJSON_AddItemToObject(session, "modalities", modalities);
     cJSON_AddNullToObject(session, "input_audio_transcription");
-    // Configure session-level instructions and VAD
+    // Configure session-level voice, instructions, and VAD
+    cJSON_AddStringToObject(session, "voice", "marin");
     cJSON_AddStringToObject(session, "instructions",
                             "You are a realtime voice companion designed for presence—natural timing, warmth, and quick back-and-forth.\n\n"
                             "Core vibe\n"
@@ -572,7 +573,7 @@ int start_webrtc(void)
     };
     openai_signaling_cfg_t openai_cfg = {
         .token = OPENAI_API_KEY,
-        .voice = "Marin",
+        .voice = "marin",
     };
     esp_webrtc_cfg_t cfg = {
         .peer_cfg = {
