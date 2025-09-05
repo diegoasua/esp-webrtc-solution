@@ -270,7 +270,7 @@ static int send_function_desc(void)
     cJSON_AddItemToObject(session, "modalities", modalities);
     cJSON_AddNullToObject(session, "input_audio_transcription");
     // Configure session-level voice, instructions, and VAD
-    cJSON_AddStringToObject(session, "voice", "marin");
+    cJSON_AddStringToObject(session, "voice", "cedar");
     cJSON_AddStringToObject(session, "instructions",
                             "You are a realtime voice companion designed for presence—natural timing, warmth, and quick back-and-forth.\n\n"
                             "Core vibe\n"
@@ -515,8 +515,10 @@ static int webrtc_event_handler(esp_webrtc_event_t *event, void *ctx)
         esp_peer_create_data_channel(peer_handle, &cfg);
     }
     if (event->type == ESP_WEBRTC_EVENT_DATA_CHANNEL_OPENED) {
-        send_response("How can I help?");
+        // Apply session config (voice, VAD, system prompt, tools) before any response
         send_function_desc();
+        // Optional: greet after session.update so new settings apply to the first reply
+        send_response("How can I help?");
     }
     return 0;
 }
@@ -573,7 +575,7 @@ int start_webrtc(void)
     };
     openai_signaling_cfg_t openai_cfg = {
         .token = OPENAI_API_KEY,
-        .voice = "marin",
+        .voice = "cedar",
     };
     esp_webrtc_cfg_t cfg = {
         .peer_cfg = {
