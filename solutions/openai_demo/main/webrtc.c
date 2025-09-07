@@ -333,7 +333,7 @@ static int send_function_desc(void)
     cJSON_AddStringToObject(session, "instructions", OPENAI_SYSTEM_PROMPT);
     cJSON *turn_detection = cJSON_CreateObject();
     cJSON_AddStringToObject(turn_detection, "type", "semantic_vad");
-    cJSON_AddStringToObject(turn_detection, "eagerness", "medium");
+    cJSON_AddStringToObject(turn_detection, "eagerness", "low");
     cJSON_AddItemToObject(session, "turn_detection", turn_detection);
     cJSON *tools = cJSON_CreateArray();
     cJSON_AddItemToObject(session, "tools", tools);
